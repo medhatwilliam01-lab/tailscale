@@ -1,5 +1,5 @@
 ```yaml
-name: Secure RDP via Tailscale - Diagnostics
+name: Secure RDP via Tailscale (Automated Loop)
 
 on:
   workflow_dispatch:
@@ -7,13 +7,17 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tailscale-diagnostics
+  cancel-in-progress: false
+
 jobs:
   secure-rdp:
     runs-on: windows-2025
     timeout-minutes: 15
 
     steps:
-      - name: Validate configuration
+      - name: Validate Configuration
         shell: pwsh
         env:
           TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
@@ -21,11 +25,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
-            throw "Missing GitHub Secret: TAILSCALE_AUTH_KEY"
+              throw "Missing repository secret: TAILSCALE_AUTH_KEY"
           }
 
-          Write-Host "Windows runner is available."
-          Write-Host "Tailscale authentication secret is configured."
+          Write-Host "Windows runner is ready."
+          Write-Host "Tailscale secret is configured."
 
       - name: Install Tailscale
         shell: pwsh
@@ -35,25 +39,25 @@ jobs:
           $msi = Join-Path $env:TEMP 'tailscale-setup.msi'
           $url = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 
-          Invoke-WebRequest -Uri $url -OutFile $msi
-
           try {
-            $process = Start-Process `
-              -FilePath 'msiexec.exe' `
-              -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') `
-              -Wait -PassThru
+              Invoke-WebRequest -Uri $url -OutFile $msi
 
-            if ($process.ExitCode -notin @(0, 3010)) {
-              throw "Tailscale installation failed: exit code $($process.ExitCode)"
-            }
+              $proc = Start-Process `
+                  -FilePath 'msiexec.exe' `
+                  -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') `
+                  -Wait -PassThru
 
-            Write-Host "Tailscale installation completed."
+              if ($proc.ExitCode -notin @(0, 3010)) {
+                  throw "Tailscale MSI installation failed: $($proc.ExitCode)"
+              }
+
+              Write-Host "Tailscale installation completed."
           }
           finally {
-            Remove-Item $msi -Force -ErrorAction SilentlyContinue
+              Remove-Item $msi -Force -ErrorAction SilentlyContinue
           }
 
-      - name: Connect and verify Tailscale
+      - name: Connect Tailscale
         shell: pwsh
         env:
           TS_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
@@ -63,7 +67,7 @@ jobs:
           $exe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 
           if (-not (Test-Path $exe)) {
-            throw "Tailscale executable was not found."
+              throw "Tailscale executable not found: $exe"
           }
 
           $hostname = "gh-diagnostic-${{ github.run_id }}"
@@ -71,17 +75,16 @@ jobs:
           & $exe up "--authkey=$env:TS_AUTH_KEY" "--hostname=$hostname"
 
           if ($LASTEXITCODE -ne 0) {
-            throw "Tailscale connection failed with exit code $LASTEXITCODE"
+              throw "Tailscale connection failed: exit code $LASTEXITCODE"
           }
 
           $ip = & $exe ip -4
 
           if ($LASTEXITCODE -ne 0 -or
               [string]::IsNullOrWhiteSpace(($ip -join ''))) {
-            throw "Tailscale did not return an IPv4 address."
+              throw "Unable to retrieve the Tailscale IPv4 address."
           }
 
           Write-Host "Tailscale connection verified."
-          Write-Host "Tailscale IPv4 address: $($ip -join ', ')"
-          Write-Host "No RDP credentials have been printed."
+          Write-Host "Tailscale IPv4: $($ip -join ', ')"
 ```
