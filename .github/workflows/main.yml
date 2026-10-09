@@ -1,7 +1,7 @@
 ```yaml
 name: Secure RDP via Tailscale (Automated Loop)
 
-on:
+'on':
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           if ([string]::IsNullOrWhiteSpace($env:TS_AUTH_KEY)) {
-              throw "Missing repository secret: TAILSCALE_AUTH_KEY"
+            throw "Missing repository secret: TAILSCALE_AUTH_KEY"
           }
 
           Write-Host "Windows runner is ready."
@@ -40,21 +40,21 @@ jobs:
           $url = 'https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi'
 
           try {
-              Invoke-WebRequest -Uri $url -OutFile $msi
+            Invoke-WebRequest -Uri $url -OutFile $msi
 
-              $proc = Start-Process `
-                  -FilePath 'msiexec.exe' `
-                  -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') `
-                  -Wait -PassThru
+            $proc = Start-Process `
+              -FilePath 'msiexec.exe' `
+              -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart') `
+              -Wait -PassThru
 
-              if ($proc.ExitCode -notin @(0, 3010)) {
-                  throw "Tailscale MSI installation failed: $($proc.ExitCode)"
-              }
+            if ($proc.ExitCode -notin @(0, 3010)) {
+              throw "Tailscale MSI installation failed: exit code $($proc.ExitCode)"
+            }
 
-              Write-Host "Tailscale installation completed."
+            Write-Host "Tailscale installation completed."
           }
           finally {
-              Remove-Item $msi -Force -ErrorAction SilentlyContinue
+            Remove-Item $msi -Force -ErrorAction SilentlyContinue
           }
 
       - name: Connect Tailscale
@@ -67,7 +67,7 @@ jobs:
           $exe = Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe'
 
           if (-not (Test-Path $exe)) {
-              throw "Tailscale executable not found: $exe"
+            throw "Tailscale executable not found: $exe"
           }
 
           $hostname = "gh-diagnostic-${{ github.run_id }}"
@@ -75,14 +75,14 @@ jobs:
           & $exe up "--authkey=$env:TS_AUTH_KEY" "--hostname=$hostname"
 
           if ($LASTEXITCODE -ne 0) {
-              throw "Tailscale connection failed: exit code $LASTEXITCODE"
+            throw "Tailscale connection failed: exit code $LASTEXITCODE"
           }
 
           $ip = & $exe ip -4
 
           if ($LASTEXITCODE -ne 0 -or
               [string]::IsNullOrWhiteSpace(($ip -join ''))) {
-              throw "Unable to retrieve the Tailscale IPv4 address."
+            throw "Unable to retrieve the Tailscale IPv4 address."
           }
 
           Write-Host "Tailscale connection verified."
