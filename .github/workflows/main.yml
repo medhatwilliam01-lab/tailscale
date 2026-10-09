@@ -1,4 +1,3 @@
-```yaml
 name: Secure RDP via Tailscale
 
 on:
@@ -233,4 +232,3 @@ jobs:
             Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] RDP session active."
             Start-Sleep -Seconds 300
           }
-```
