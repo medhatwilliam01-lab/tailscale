@@ -1,0 +1,119 @@
+```yaml
+name: Secure RDP via Tailscale
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: secure-rdp
+  cancel-in-progress: false
+
+jobs:
+  secure-rdp:
+    # Use a Windows machine you own and have registered
+    # as a self-hosted GitHub Actions runner.
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate Windows and Tailscale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (-not $IsWindows) {
+            throw "This workflow requires Windows."
+          }
+
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $ts)) {
+            throw "Tailscale is not installed."
+          }
+
+          $status = & $ts status --json | ConvertFrom-Json
+
+          if ($LASTEXITCODE -ne 0 -or
+              $status.BackendState -ne 'Running') {
+            throw "Tailscale is not connected."
+          }
+
+          $ips = @(& $ts ip -4)
+          if ($LASTEXITCODE -ne 0 -or $ips.Count -eq 0) {
+            throw "Could not obtain the Tailscale IPv4 address."
+          }
+
+          "Tailscale IPv4: $($ips -join ', ')" |
+            Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Enable secure Remote Desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+          $tcpPath = "$rdpPath\WinStations\RDP-Tcp"
+
+          # Enable RDP while retaining Network Level Authentication.
+          Set-ItemProperty -Path $rdpPath `
+            -Name fDenyTSConnections -Value 0
+
+          Set-ItemProperty -Path $tcpPath `
+            -Name UserAuthentication -Value 1
+
+          # Require TLS security layer.
+          Set-ItemProperty -Path $tcpPath `
+            -Name SecurityLayer -Value 2
+
+          # Permit inbound RDP only from Tailscale's IPv4 range.
+          Get-NetFirewallRule -DisplayName 'RDP-Tailscale-Only' `
+            -ErrorAction SilentlyContinue |
+            Remove-NetFirewallRule
+
+          New-NetFirewallRule `
+            -DisplayName 'RDP-Tailscale-Only' `
+            -Direction Inbound `
+            -Action Allow `
+            -Protocol TCP `
+            -LocalPort 3389 `
+            -RemoteAddress '100.64.0.0/10' `
+            -Profile Any
+
+          # Enable the Remote Desktop service.
+          Set-Service -Name TermService -StartupType Manual
+          Start-Service -Name TermService
+
+          $service = Get-Service TermService
+          if ($service.Status -ne 'Running') {
+            throw "Remote Desktop service did not start."
+          }
+
+          @(
+            "RDP configuration completed."
+            "NLA: enabled"
+            "Security layer: TLS"
+            "Firewall: restricted to Tailscale IPv4 range"
+            "Tailscale authentication: verified"
+          ) | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Verify configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $rdpPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+          $tcpPath = "$rdpPath\WinStations\RDP-Tcp"
+
+          $deny = (Get-ItemProperty $rdpPath).fDenyTSConnections
+          $nla = (Get-ItemProperty $tcpPath).UserAuthentication
+          $tls = (Get-ItemProperty $tcpPath).SecurityLayer
+
+          if ($deny -ne 0 -or $nla -ne 1 -or $tls -ne 2) {
+            throw "RDP security verification failed."
+          }
+
+          Write-Host "PASS: RDP enabled, NLA enabled, TLS required."
+```
